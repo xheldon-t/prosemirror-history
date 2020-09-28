@@ -6,17 +6,25 @@ import {Plugin, PluginKey} from "prosemirror-state"
 // state, because ProseMirror supports applying changes without adding
 // them to the history (for example during collaboration).
 //
+// @cn ProseMirror 的历史并不只是简单的回滚到之前的 state，因为 ProseMirror 支持修改文档而不将它们添加到历史栈中（例如，在协同编辑时）。
+//
 // To this end, each 'Branch' (one for the undo history and one for
 // the redo history) keeps an array of 'Items', which can optionally
 // hold a step (an actual undoable change), and always hold a position
 // map (which is needed to move changes below them to apply to the
 // current document).
 //
+// @cn 为此，每个 「Branch」（一个用于撤销历史，一个用于重做历史）保存一个「Items」的数组，每个 Item 可选的持有一个 step（一个执行实际撤销操作的修改），
+// 并且总是持有一个位置 map（以用来将其后续的修改应用到当前文档中）。
+//
 // An item that has both a step and a selection bookmark is the start
 // of an 'event' — a group of changes that will be undone or redone at
 // once. (It stores only the bookmark, since that way we don't have to
 // provide a document until the selection is actually applied, which
 // is useful when compressing.)
+//
+// @cn 一个 item 同时有一个 step 和一个选区 bookmark，它是一个「事件」的开始 -- 即一组修改将会被一次性立即撤销或者重做。（它只存储 bookmark），
+// 因为这样的话在实际应用选区之前，我们就不需要提供一个文档，这在压缩时非常有用）。
 
 // Used to schedule history compression
 const max_empty_items = 500
@@ -365,6 +373,11 @@ function mustPreserveItems(state) {
 // Set a flag on the given transaction that will prevent further steps
 // from being appended to an existing history event (so that they
 // require a separate undo command to undo).
+//
+// @cn 在给定的 transaction 上设置一个标记，这将会阻止接下来的 steps 们被附加到一个已经存在的历史事件中（这样就需要一个单独的撤销命令来撤销了）。
+//
+// @comment 这个函数不能顾名思义的以为不会会将 tr 加入到历史栈中。正确理解应该是其会将本来能够一个 tr n 个 steps 完成的修改，
+// 变成了 两个 tr，n/2 个 step。因此需要额外的撤销命令来撤销修改。「close」表示紧急中断该 tr，然后将剩余的 steps 放到一个新的 tr 中。
 export function closeHistory(tr) {
   return tr.setMeta(closeHistoryKey, true)
 }
@@ -377,21 +390,42 @@ const closeHistoryKey = new PluginKey("closeHistory")
 // plugin will track undo and redo stacks, which can be used with the
 // [`undo`](#history.undo) and [`redo`](#history.redo) commands.
 //
+// @cn 返回一个插件以使编辑器撤销历史可用。该插件将会追踪撤销和重做的操作栈，这可以和 [`撤销`](#history.undo) and [`重做`](#history.redo)
+// 命令一同使用。
+//
 // You can set an `"addToHistory"` [metadata
 // property](#state.Transaction.setMeta) of `false` on a transaction
 // to prevent it from being rolled back by undo.
 //
+// @cn 你可以在一个 transaction 上设置一个 `"addToHistory"` 的 [metadata 属性](#state.Transaction.setMeta) 为 `false`，来阻止该
+// tr 被撤销回滚。
+//
+// @comment 设置了这个之后，该 tr 就相当于不会被加入到历史栈中。
+//
 //   config::-
 //   Supports the following configuration options:
+//
+//   @cn 支持下列的参数可选：
 //
 //     depth:: ?number
 //     The amount of history events that are collected before the
 //     oldest events are discarded. Defaults to 100.
 //
+//     @cn 在最早的操作历史被丢弃之前，历史栈的最大长度，默认是 100。
+//
+//     @comment 超过了就先丢弃最早的操作记录。
+//
 //     newGroupDelay:: ?number
 //     The delay between changes after which a new group should be
 //     started. Defaults to 500 (milliseconds). Note that when changes
 //     aren't adjacent, a new group is always started.
+//
+//     @cn 操作从开始算起应该持续多久才会被算作一个操作。默认是 500（毫秒）。记住，如果多个修改不相邻的话，总是会被算作是新的操作。
+//
+//     @comment 如果该值被设置为 500，则在 500 毫秒内输入 10 个字，这样会触发 10 个 tr，但是会被归为一「组」，撤销的时候直接撤销这 10 个字的输入记录。
+//     如果 500 毫秒内输入 20 个字同理撤销这 20 个字的记录。如果在 500 毫秒内输入了 10 个字，在 501 毫秒内输入了第 11 个字，则撤销的时候，那第 501 毫秒输入的第
+//     11 个字被算做是一组，先撤销那 1 个字的输入，再撤销那 10 个字的输入。这个逻辑是为了和系统输入保持一致，各位可以试试在系统的某个界面如搜索框变换输入速度来输入内容后
+//     撤销，看会发生什么。
 export function history(config) {
   config = {depth: config && config.depth || 100,
             newGroupDelay: config && config.newGroupDelay || 500}
@@ -413,6 +447,8 @@ export function history(config) {
 
 // :: (EditorState, ?(tr: Transaction)) → bool
 // A command function that undoes the last change, if any.
+//
+// @cn 一个可以撤销最后修改（如果有）的命令函数。
 export function undo(state, dispatch) {
   let hist = historyKey.getState(state)
   if (!hist || hist.done.eventCount == 0) return false
@@ -422,6 +458,8 @@ export function undo(state, dispatch) {
 
 // :: (EditorState, ?(tr: Transaction)) → bool
 // A command function that redoes the last undone change, if any.
+//
+// @cn 一个可以重做最后一次撤销修改（如果有）的命令函数。
 export function redo(state, dispatch) {
   let hist = historyKey.getState(state)
   if (!hist || hist.undone.eventCount == 0) return false
@@ -431,6 +469,8 @@ export function redo(state, dispatch) {
 
 // :: (EditorState) → number
 // The amount of undoable events available in a given state.
+//
+// @cn 在给定的 state 中可以被撤销的操作的数量。
 export function undoDepth(state) {
   let hist = historyKey.getState(state)
   return hist ? hist.done.eventCount : 0
@@ -438,6 +478,8 @@ export function undoDepth(state) {
 
 // :: (EditorState) → number
 // The amount of redoable events available in a given editor state.
+//
+// @cn 在给定的编辑器 state 中可以被重做的操作的数量。
 export function redoDepth(state) {
   let hist = historyKey.getState(state)
   return hist ? hist.undone.eventCount : 0
